@@ -934,17 +934,38 @@ function renderAdviceCell(trade) {
 
 window.refreshAdvice = async function(tradeId, btn) {
   const cell = btn.closest('td');
+  const trades = journalState.trades || INITIAL_TRADES;
+  const trade = trades.find(t=>(t.key||t.id)===tradeId);
   cell.innerHTML = '<span style="font-size:11px;color:#94A3B8">Analysing...</span>';
   try {
-    const trades = journalState.trades || INITIAL_TRADES;
-    const trade = trades.find(t=>(t.key||t.id)===tradeId);
     if (!trade) throw new Error('trade not found');
-    const adv = await fetchAdvice(trade);
-    if (!adv) throw new Error('no response');
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 8000);
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal: controller.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 400,
+        messages: [{ role: 'user', content: `You are a futures trading coach. Analyse this MES ($5/point) trade in 3 bullet points. Return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences). Trade: ${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold ${trade.holdTime} | P&L ${trade.realizedPL>=0?'+':''}$${trade.realizedPL.toFixed(2)} | ${trade.realizedPL>=0?'WIN':'LOSS'}. Focus on entry quality, stop/risk management, target, and one key lesson.` }] })
+    });
+    if (!res.ok) throw new Error('api_'+res.status);
+    const data = await res.json();
+    const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('parse');
+    const adv = JSON.parse(m[0]);
     try { localStorage.setItem('tj_adv_'+tradeId, JSON.stringify(adv)); } catch(e) {}
     cell.innerHTML = renderAdviceCell({...trade, key:tradeId});
   } catch(e) {
-    cell.innerHTML = `<span style="font-size:11px;color:#DC2626">Could not load.</span> <button onclick="refreshAdvice('${tradeId}',this)" style="font-size:10px;color:#6366F1;border:none;background:none;cursor:pointer;text-decoration:underline">Retry</button>`;
+    // Restore pre-embedded advice — don't show blank error
+    if (trade) {
+      cell.innerHTML = renderAdviceCell({...trade, key:tradeId});
+      const note = document.createElement('div');
+      note.style.cssText = 'font-size:10px;color:#94A3B8;margin-top:6px;padding-top:6px;border-top:1px solid #F1F5F9';
+      note.textContent = e.message.startsWith('api_401') || e.message.startsWith('api_403')
+        ? 'Live re-analysis works inside Claude.ai only — showing pre-loaded advice above.'
+        : 'Could not reach API — showing pre-loaded advice above.';
+      cell.querySelector('div') && cell.querySelector('div').appendChild(note);
+    }
   }
 };
 
