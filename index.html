@@ -228,9 +228,9 @@ input[type=file]{display:none}
       <div class="stat-sub" id="statPLSub">$5,242.67 realized · $0 open</div>
     </div>
     <div class="stat-card">
-      <div class="stat-label">Time-weighted return</div>
+      <div class="stat-label" id="statTWRRLabel">Time-weighted return</div>
       <div class="stat-value green" id="statTWRR">+97.09%</div>
-      <div class="stat-sub">Period return</div>
+      <div class="stat-sub" id="statTWRRSub">Jan – Jun 2026</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Win rate</div>
@@ -804,6 +804,33 @@ function initFilters(trades) {
     setP('largestWinVal', wins.length  ? $(lw,0) : '—', 'green');
     setP('largestLossVal', losses.length ? $(ll,0) : '—', 'red');
     setP('realizedVal', $(rpl,0), 'green');
+
+    // TWRR — use pre-calculated month start NAVs; all-time from statement
+    const MONTH_START_NAV = { 'all':null, '2026-03':5000, '2026-05':4633.77, '2026-06':9593.80 };
+    const MONTH_LABEL_MAP = { 'all':'Jan – Jun 2026', '2026-03':'Mar 2026', '2026-05':'May 2026', '2026-06':'Jun 2026' };
+    const twrrEl   = document.getElementById('statTWRR');
+    const twrrLbl  = document.getElementById('statTWRRLabel');
+    const twrrSub  = document.getElementById('statTWRRSub');
+    if (twrrEl) {
+      if (month === 'all') {
+        twrrEl.textContent = '+97.09%';
+        twrrEl.className = 'stat-value green';
+        if (twrrLbl) twrrLbl.textContent = 'Time-weighted return';
+        if (twrrSub) twrrSub.textContent = 'Jan – Jun 2026';
+      } else {
+        const startNav = MONTH_START_NAV[month];
+        if (startNav && startNav > 0) {
+          const pct = (rpl / startNav * 100);
+          twrrEl.textContent = (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+          twrrEl.className = 'stat-value ' + (pct >= 0 ? 'green' : 'red');
+        } else {
+          twrrEl.textContent = '—';
+          twrrEl.className = 'stat-value';
+        }
+        if (twrrLbl) twrrLbl.textContent = 'Period return';
+        if (twrrSub) twrrSub.textContent = MONTH_LABEL_MAP[month] || label(month);
+      }
+    }
 
     // Filter summary bar
     if (summary) {
