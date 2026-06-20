@@ -299,6 +299,7 @@ input[type=file]{display:none}
             <th>Hold time</th>
             <th style="text-align:right">Realized P&amp;L</th>
             <th style="min-width:240px">Your notes</th>
+            <th style="min-width:280px">Claude's take</th>
           </tr>
         </thead>
         <tbody id="tradeTableBody">
@@ -817,6 +818,137 @@ function initFilters(trades) {
 }
 
 // ─────────────────────────────────────────────
+// CLAUDE'S TRADE ADVICE
+// ─────────────────────────────────────────────
+const TRADE_ADVICE = {
+  T001: { rating:'bad', verdict:'Shorted into a trend — no entry confirmation',
+    points:[
+      'Price ran 106 pts against you in 2 minutes. The trade was wrong at entry — you shorted before any bearish reversal signal appeared.',
+      'Stop was absent or ignored. Max acceptable risk on MES = 20 pts ($100). Actual loss = $532, more than 5× that.',
+      'Rule: Never short without a 1H bearish engulf or rejection candle at resistance first. If price doesn\'t react within 3 bars, the level has failed.'
+    ]},
+  T002: { rating:'good', verdict:'Textbook short after failed rally',
+    points:[
+      'Used the prior swing high (6706 from T001) as resistance and waited for price to come to the level. This is exactly the right process.',
+      'Held 33.5 pts for over an hour — disciplined. Could have trailed to 6600 for another 50 pts if you used a trailing stop after +20 pts.',
+      'This is the template T001 should have followed. The difference: patience and confirmation before entry.'
+    ]},
+  T003: { rating:'good', verdict:'Trade of the year — held conviction for 61 days',
+    points:[
+      'Bought at a significant dip and held through all noise for 913 pts. This single trade covers every loss you had 4× over.',
+      'Key lesson: when macro setup is this clear, size up. One contract = $4,565. Two contracts = $9,130. The risk was the same entry level.',
+      'Your biggest edge is clearly swing trades. More of these, fewer of the low-R scalps.'
+    ]},
+  T004: { rating:'good', verdict:'Solid follow-through — exit slightly early',
+    points:[
+      'Scale-in approach across two days was disciplined. Catching the continuation after T003 showed good momentum reading.',
+      'Exit at 7570 left ~$150 on the table — 7600 was the obvious resistance target and would have been a clean 2R exit.',
+      'Rule: When the trend from a major swing trade is still intact, let at least one contract run to the next key level.'
+    ]},
+  T005: { rating:'ok', verdict:'Win but poor risk/reward — not worth the risk',
+    points:[
+      'Only 13.5 pts on 2 contracts with a likely 20-pt stop = roughly 0.7R. These low-R trades quietly destroy your profit factor.',
+      'Same setup targeting 7600 instead of 7553 would have been 3× the profit with identical risk.',
+      'Standard to apply: if the target is not at least 2× the stop distance, skip the trade and wait for a better setup.'
+    ]},
+  T006: { rating:'good', verdict:'Excellent — right level, right size, right target',
+    points:[
+      'Bought the dip to 7553 (POC area) and held to 7606 (VAH). Entry and exit both anchored to key volume levels.',
+      'This is your target trade structure: buy pullback to a high-volume node, target the value area high.',
+      'To improve: scale out contract 1 at 7580 and trail contract 2 with a stop at breakeven — could have captured 7630+.'
+    ]},
+  T007: { rating:'bad', verdict:'Entered longs before support was confirmed',
+    points:[
+      'Bought 7525 before price had established a low-of-day. Within 3 hours price was at your stop — the entry lacked confirmation.',
+      'The -45 pt stop at 7480 was the right level, but a 4H close above 7510 before entry would have kept you out of this loss.',
+      'Rule: In a downtrend day, wait for a clear higher-low to form on the 1H before adding longs. T007 and T008 both ignored this.'
+    ]},
+  T008: { rating:'bad', verdict:'Largest loss — stop discipline failed over 4 days',
+    points:[
+      'Held 220 pts against you over 4 days. 7400 (FOMC low) was your stated line-in-the-sand — a hard stop there limits loss to ~$550, not $1,102.',
+      'Never let a 1-day trade become a 4-day loss. If price closes below key support, close and re-assess the next morning.',
+      'The silver lining: this flush created the exact demand zone that made T009 a high-conviction long at 7330.'
+    ]},
+  T009: { rating:'good', verdict:'Caught the bottom — high conviction, perfect entry',
+    points:[
+      'Entered at the 95%-fresh demand zone (7330) after the SSL sweep at 7289 — exactly what the pre-market brief called. Held 7 days for 229 pts.',
+      'This was the highest-conviction setup of the period: SSL sweep + fresh demand + FOMC bounce + ascending delta. Should have been 2 contracts.',
+      '2 contracts here = $2,290. The framework identified it perfectly — next time, size up when all 5+ frameworks align.'
+    ]},
+  T010: { rating:'bad', verdict:'Scalp that barely covers commissions — skip it',
+    points:[
+      '4.75 pts on 1 contract = $23.75 gross, $22.51 net. This trade consumed time and mental energy for less than the cost of a coffee.',
+      'Risk/reward: you likely risked 20 pts to make 4.75 pts = 0.24R. One losing version of this trade wipes out 4 wins.',
+      'Hard rule: minimum 2R setup or do not trade. Save capital and focus for T011-type setups.'
+    ]},
+  T011: { rating:'good', verdict:'Clean roll into MESU6 — methodical scale-in',
+    points:[
+      'Scaling into 3 contracts at 7558, 7546, 7536 gave a strong average of 7546.92. Each lower entry reduced your breakeven.',
+      'Good first MESU6 trade. 25 pts per contract × 3 = solid. Target could have been extended toward 7600 for another $135.',
+      'With 3 contracts the P&L swings are larger — confirm stops are always set (20-pt stop × 3 contracts = $300 total risk).'
+    ]}
+};
+
+async function fetchAdvice(trade) {
+  const prompt = `You are a futures trading coach. Analyse this MES (Micro E-mini S&P 500, $5/point) trade in 3 bullet points. Be specific and actionable. Format: return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences).
+
+Trade: ${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold ${trade.holdTime} | P&L ${trade.realizedPL >= 0 ? '+' : ''}$${trade.realizedPL.toFixed(2)} | Result: ${trade.realizedPL >= 0 ? 'WIN' : 'LOSS'}
+
+Focus on: entry quality, stop/risk management, target selection, and one key lesson.`;
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 400,
+      messages: [{ role: 'user', content: prompt }] })
+  });
+  const data = await res.json();
+  const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+  const m = txt.match(/\{[\s\S]*\}/);
+  return m ? JSON.parse(m[0]) : null;
+}
+
+function renderAdviceCell(trade) {
+  const id = trade.key || trade.id;
+  const stored = (() => { try { return JSON.parse(localStorage.getItem('tj_adv_'+id)||'null'); } catch(e) { return null; } })();
+  const adv = stored || TRADE_ADVICE[trade.id] || null;
+
+  const ratingColor = r => r==='good' ? '#059669' : r==='bad' ? '#DC2626' : '#D97706';
+  const ratingBg    = r => r==='good' ? '#D1FAE5' : r==='bad' ? '#FEE2E2' : '#FEF3C7';
+  const ratingIcon  = r => r==='good' ? '✓' : r==='bad' ? '✗' : '⚠';
+
+  if (adv) {
+    return `<div style="font-size:11px">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+        <span style="background:${ratingBg(adv.rating)};color:${ratingColor(adv.rating)};font-size:10px;padding:1px 7px;border-radius:3px;font-weight:600">${ratingIcon(adv.rating)} ${adv.verdict}</span>
+      </div>
+      <ul style="padding-left:14px;margin:0;color:#374151;line-height:1.5">
+        ${adv.points.map(p=>`<li style="margin-bottom:4px">${p}</li>`).join('')}
+      </ul>
+      <button onclick="refreshAdvice('${id}',this)" style="margin-top:7px;font-size:10px;padding:2px 8px;cursor:pointer;border-radius:4px;color:#6366F1;border:1px solid #C7D2FE;background:#EEF2FF;font-family:inherit">↻ Re-analyse</button>
+    </div>`;
+  }
+
+  return `<button onclick="refreshAdvice('${id}',this)" style="font-size:11px;padding:4px 10px;cursor:pointer;border-radius:5px;color:#6366F1;border:1px solid #C7D2FE;background:#EEF2FF;font-family:inherit">Ask Claude ↗</button>`;
+}
+
+window.refreshAdvice = async function(tradeId, btn) {
+  const cell = btn.closest('td');
+  cell.innerHTML = '<span style="font-size:11px;color:#94A3B8">Analysing...</span>';
+  try {
+    const trades = journalState.trades || INITIAL_TRADES;
+    const trade = trades.find(t=>(t.key||t.id)===tradeId);
+    if (!trade) throw new Error('trade not found');
+    const adv = await fetchAdvice(trade);
+    if (!adv) throw new Error('no response');
+    try { localStorage.setItem('tj_adv_'+tradeId, JSON.stringify(adv)); } catch(e) {}
+    cell.innerHTML = renderAdviceCell({...trade, key:tradeId});
+  } catch(e) {
+    cell.innerHTML = `<span style="font-size:11px;color:#DC2626">Could not load.</span> <button onclick="refreshAdvice('${tradeId}',this)" style="font-size:10px;color:#6366F1;border:none;background:none;cursor:pointer;text-decoration:underline">Retry</button>`;
+  }
+};
+
+// ─────────────────────────────────────────────
 // RENDER TRADES
 // ─────────────────────────────────────────────
 function renderTrades(trades) {
@@ -863,6 +995,9 @@ function renderTrades(trades) {
             oninput="handleNoteInput(this)">${savedNote}</textarea>
           <div class="notes-saved" id="saved_${t.key||t.id}">Saved ✓</div>
         </div>
+      </td>
+      <td style="vertical-align:top;padding:11px 12px;border-left:3px solid ${t.realizedPL>0?'#D1FAE5':t.realizedPL<-400?'#FEE2E2':'#FEF3C7'}">
+        ${renderAdviceCell(t)}
       </td>
     `;
     tbody.appendChild(tr);
