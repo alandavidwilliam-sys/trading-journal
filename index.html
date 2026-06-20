@@ -163,6 +163,10 @@ input[type=file]{display:none}
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Export notes
       </button>
+      <button class="btn btn-ghost btn-sm" onclick="openApiKeyModal()" id="apiKeyBtn">
+        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="8" cy="15" r="3"/><path d="M11 15h9M17 12v6"/></svg>
+        <span id="apiKeyBtnLabel">Add API key</span>
+      </button>
       <label class="btn btn-primary btn-sm" for="csvUpload" style="cursor:pointer">
         <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Upload new statement
@@ -178,6 +182,24 @@ input[type=file]{display:none}
     <div class="meta-item" id="metaGenerated">Generated <span>Jun 16, 2026</span></div>
   </div>
 </header>
+
+<!-- API KEY MODAL -->
+<div id="apiKeyModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center">
+  <div style="background:#fff;border-radius:12px;padding:24px;width:440px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.2)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-size:15px;font-weight:600;color:#1E293B">Anthropic API key</div>
+      <button onclick="closeApiKeyModal()" style="background:none;border:none;cursor:pointer;color:#94A3B8;font-size:20px;line-height:1">×</button>
+    </div>
+    <p style="font-size:13px;color:#64748B;margin-bottom:16px;line-height:1.6">Your key is stored only in this browser (localStorage) and never sent anywhere except directly to Anthropic's API for Re-analyse requests.</p>
+    <div style="margin-bottom:6px;font-size:12px;color:#475569;font-weight:500">API key</div>
+    <input id="apiKeyInput" type="password" placeholder="sk-ant-..." style="width:100%;padding:9px 12px;border:1px solid #E2E8F0;border-radius:8px;font-size:13px;font-family:monospace;margin-bottom:12px;box-sizing:border-box;outline:none" oninput="this.style.borderColor='#6366F1'">
+    <div style="font-size:11px;color:#94A3B8;margin-bottom:16px">Get your key at <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:#6366F1">console.anthropic.com/settings/keys</a> — use a key with limited credits for safety.</div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button onclick="clearApiKey()" style="padding:8px 16px;border-radius:7px;border:1px solid #E2E8F0;background:#fff;color:#DC2626;font-size:13px;cursor:pointer">Remove key</button>
+      <button onclick="saveApiKey()" style="padding:8px 16px;border-radius:7px;border:none;background:#6366F1;color:#fff;font-size:13px;font-weight:500;cursor:pointer">Save key</button>
+    </div>
+  </div>
+</div>
 
 <main class="main">
 
@@ -818,7 +840,46 @@ function initFilters(trades) {
 }
 
 // ─────────────────────────────────────────────
-// CLAUDE'S TRADE ADVICE
+// API KEY MANAGEMENT
+// ─────────────────────────────────────────────
+function getApiKey() {
+  try { return localStorage.getItem('tj_anthropic_key') || ''; } catch(e) { return ''; }
+}
+function openApiKeyModal() {
+  const key = getApiKey();
+  document.getElementById('apiKeyInput').value = key;
+  document.getElementById('apiKeyModal').style.display = 'flex';
+}
+function closeApiKeyModal() {
+  document.getElementById('apiKeyModal').style.display = 'none';
+}
+function saveApiKey() {
+  const key = document.getElementById('apiKeyInput').value.trim();
+  try { localStorage.setItem('tj_anthropic_key', key); } catch(e) {}
+  updateApiKeyBtn();
+  closeApiKeyModal();
+  showToast(key ? 'API key saved — Re-analyse now works on this device' : 'API key cleared');
+}
+function clearApiKey() {
+  document.getElementById('apiKeyInput').value = '';
+  try { localStorage.removeItem('tj_anthropic_key'); } catch(e) {}
+  updateApiKeyBtn();
+  closeApiKeyModal();
+  showToast('API key removed');
+}
+function updateApiKeyBtn() {
+  const key = getApiKey();
+  const lbl = document.getElementById('apiKeyBtnLabel');
+  const btn = document.getElementById('apiKeyBtn');
+  if (lbl) lbl.textContent = key ? '✓ API key set' : 'Add API key';
+  if (btn) btn.style.color = key ? '#1D9E75' : '';
+}
+// Close modal when clicking backdrop
+document.getElementById('apiKeyModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('apiKeyModal')) closeApiKeyModal();
+});
+
+
 // ─────────────────────────────────────────────
 const TRADE_ADVICE = {
   T001: { rating:'bad', verdict:'Shorted into a trend — no entry confirmation',
@@ -890,18 +951,22 @@ const TRADE_ADVICE = {
 };
 
 async function fetchAdvice(trade) {
-  const prompt = `You are a futures trading coach. Analyse this MES (Micro E-mini S&P 500, $5/point) trade in 3 bullet points. Be specific and actionable. Format: return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences).
+  const key = getApiKey();
+  const headers = { 'Content-Type': 'application/json' };
+  if (key) { headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; headers['anthropic-dangerous-direct-browser-access'] = 'true'; }
+
+  const prompt = `You are a futures trading coach. Analyse this MES (Micro E-mini S&P 500, $5/point) trade in 3 bullet points. Be specific and actionable. Return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences).
 
 Trade: ${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold ${trade.holdTime} | P&L ${trade.realizedPL >= 0 ? '+' : ''}$${trade.realizedPL.toFixed(2)} | Result: ${trade.realizedPL >= 0 ? 'WIN' : 'LOSS'}
 
 Focus on: entry quality, stop/risk management, target selection, and one key lesson.`;
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers,
     body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 400,
       messages: [{ role: 'user', content: prompt }] })
   });
+  if (!res.ok) throw new Error('api_'+res.status);
   const data = await res.json();
   const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
   const m = txt.match(/\{[\s\S]*\}/);
@@ -961,9 +1026,9 @@ window.refreshAdvice = async function(tradeId, btn) {
       cell.innerHTML = renderAdviceCell({...trade, key:tradeId});
       const note = document.createElement('div');
       note.style.cssText = 'font-size:10px;color:#94A3B8;margin-top:6px;padding-top:6px;border-top:1px solid #F1F5F9';
-      note.textContent = e.message.startsWith('api_401') || e.message.startsWith('api_403')
-        ? 'Live re-analysis works inside Claude.ai only — showing pre-loaded advice above.'
-        : 'Could not reach API — showing pre-loaded advice above.';
+      note.textContent = e.message === 'api_401' || e.message === 'api_403'
+        ? '⚠ API key missing or invalid — click "Add API key" in the header to enable live re-analysis.'
+        : 'Could not reach API — check connection or add your API key in the header.';
       cell.querySelector('div') && cell.querySelector('div').appendChild(note);
     }
   }
@@ -1253,6 +1318,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
   };
   renderAll(journalState.trades, journalState.openPositions, journalState.equityCurve, INITIAL_META, INITIAL_NAV, 97.09);
   initFilters(journalState.trades);
+  updateApiKeyBtn();
   fetchNews();
 
   // Set today's date
