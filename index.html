@@ -725,6 +725,7 @@ function initFilters(trades) {
   function applyFilter(month) {
     active = month;
     const rows = [...document.querySelectorAll('#tradeTableBody tr')];
+    const ft = month === 'all' ? trades : trades.filter(t => getTradeMonth(t) === month);
 
     // Show/hide rows and renumber
     let n = 1;
@@ -739,24 +740,62 @@ function initFilters(trades) {
     const countEl = document.getElementById('tradeCount');
     if (countEl) countEl.textContent = month === 'all' ? trades.length+' trades' : visible+' of '+trades.length;
 
-    // Filter summary
+    // ── Recalculate all performance metrics for filtered set ──
+    const wins  = ft.filter(t => t.realizedPL > 0);
+    const losses = ft.filter(t => t.realizedPL <= 0);
+    const rpl   = ft.reduce((s,t) => s+t.realizedPL, 0);
+    const tc    = ft.reduce((s,t) => s+(t.commission||0), 0);
+    const gw    = wins.reduce((s,t)  => s+t.realizedPL, 0);
+    const gl    = Math.abs(losses.reduce((s,t) => s+t.realizedPL, 0));
+    const aw    = wins.length  ? gw/wins.length  : 0;
+    const al    = losses.length ? gl/losses.length : 0;
+    const pf    = gl > 0 ? (gw/gl).toFixed(2)+'×' : wins.length ? '∞' : '—';
+    const wlr   = al > 0 ? (aw/al).toFixed(2)+'×' : '—';
+    const lw    = wins.length  ? Math.max(...wins.map(t=>t.realizedPL))  : 0;
+    const ll    = losses.length ? Math.abs(Math.min(...losses.map(t=>t.realizedPL))) : 0;
+    const wr    = ft.length ? (wins.length/ft.length*100).toFixed(1)+'%' : '—';
+
+    const $   = (n,d=2) => '$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:d,maximumFractionDigits:d});
+    const set = (id,v,cls) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = v;
+      if (cls !== undefined) el.className = 'stat-value '+cls;
+    };
+    const setP = (id,v,cls) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = v;
+      if (cls !== undefined) el.className = 'perf-item-value '+cls;
+    };
+
+    set('statWinRate', wr);
+    set('statWRsub', wins.length+'W / '+losses.length+'L · '+ft.length+' trades');
+    set('statPL', (rpl>=0?'+ ':'- ')+$(rpl), rpl>=0?'green':'red');
+    set('statPLSub', $(rpl)+' realized · $0 open');
+    setP('pfVal', pf);
+    setP('avgWinVal', wins.length  ? $(aw,0) : '—', 'green');
+    setP('avgLossVal', losses.length ? $(al,0) : '—', 'red');
+    setP('wlRatioVal', wlr);
+    setP('commVal', $(tc));
+    setP('largestWinVal', wins.length  ? $(lw,0) : '—', 'green');
+    setP('largestLossVal', losses.length ? $(ll,0) : '—', 'red');
+    setP('realizedVal', $(rpl,0), 'green');
+
+    // Filter summary bar
     if (summary) {
       if (month === 'all') { summary.style.display = 'none'; }
       else {
-        const ft = trades.filter(t => getTradeMonth(t) === month);
-        const wins = ft.filter(t => t.realizedPL > 0);
-        const pl = ft.reduce((s,t) => s+t.realizedPL, 0);
-        const wr = ft.length ? Math.round(wins.length/ft.length*100) : 0;
-        const sign = pl >= 0 ? '+ $' : '- $';
-        const plColor = pl >= 0 ? '#059669' : '#DC2626';
+        const sign = rpl >= 0 ? '+ $' : '- $';
+        const plColor = rpl >= 0 ? '#059669' : '#DC2626';
         summary.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 16px;background:#F8FAFC;border-bottom:1px solid #F1F5F9;font-size:12px;flex-wrap:wrap';
         summary.innerHTML =
           `<span style="font-weight:600;color:#1E293B">${label(month)}</span>`+
-          `<span style="color:${plColor};font-weight:700">${sign}${Math.abs(pl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>`+
+          `<span style="color:${plColor};font-weight:700">${sign}${Math.abs(rpl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>`+
           `<span style="color:#94A3B8">·</span>`+
-          `<span style="color:#475569">${wins.length}W / ${ft.length-wins.length}L · ${wr}% win rate</span>`+
+          `<span style="color:#475569">${wins.length}W / ${losses.length}L · ${wr} win rate</span>`+
           `<span style="color:#94A3B8">·</span>`+
-          `<span style="color:#475569">avg ${ft.length?(pl>=0?'+ $':'- $')+Math.abs(pl/ft.length).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'} per trade</span>`;
+          `<span style="color:#475569">avg ${ft.length?(rpl>=0?'+ $':'- $')+Math.abs(rpl/ft.length).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'} per trade</span>`;
       }
     }
 
