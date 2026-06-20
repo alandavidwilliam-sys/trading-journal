@@ -702,82 +702,79 @@ function renderOpenPositions(openPos) {
 // ─────────────────────────────────────────────
 // MONTH FILTERS
 // ─────────────────────────────────────────────
-let activeFilter = 'all';
-
 function getTradeMonth(t) {
-  const d = (t.exitDate||'').replace(',','').trim();
-  const m = d.match(/(\d{4})-(\d{2})/);
-  return m ? m[1]+'-'+m[2] : 'unknown';
+  const d = (t.exitDate||'');
+  const m = d.match(/(\d{4}-\d{2})/);
+  return m ? m[1] : '';
 }
 
-function getMonthLabel(ym) {
-  const [y,m] = ym.split('-');
-  const names = {
-    '01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun',
-    '07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'
-  };
-  return (names[m]||m)+' \''+y.slice(2);
-}
-
-function buildMonthFilters(trades) {
-  const container = document.getElementById('monthFilters');
-  if (!container) return;
-  const months = [...new Set(trades.map(getTradeMonth))].filter(m=>m!=='unknown').sort();
-  const btns = [{key:'all',label:'All time'}, ...months.map(m=>({key:m,label:getMonthLabel(m)}))];
-  container.innerHTML = btns.map(b=>
-    `<button class="filter-btn${activeFilter===b.key?' active':''}" onclick="setFilter('${b.key}')">${b.label}</button>`
-  ).join('');
-}
-
-function setFilter(month) {
-  activeFilter = month;
-  const trades = journalState.trades||INITIAL_TRADES;
-  buildMonthFilters(trades);
-  applyFilter(trades);
-}
-
-function applyFilter(allTrades) {
-  const rows = document.querySelectorAll('#tradeTableBody tr[data-month]');
-  let visible = 0;
-  rows.forEach(row => {
-    const show = activeFilter==='all' || row.dataset.month===activeFilter;
-    row.style.display = show ? '' : 'none';
-    if (show) visible++;
-  });
-
-  // Renumber visible rows
-  let idx = 1;
-  rows.forEach(row => {
-    if (row.style.display !== 'none') {
-      const el = row.querySelector('.trade-num');
-      if (el) el.textContent = idx++;
-    }
-  });
-
-  // Trade count label
-  const countEl = document.getElementById('tradeCount');
-  if (countEl) countEl.textContent = activeFilter==='all' ? `${allTrades.length} trades` : `${visible} of ${allTrades.length}`;
-
-  // Filter summary bar
+function initFilters(trades) {
+  const bar = document.getElementById('monthFilters');
   const summary = document.getElementById('filterSummary');
-  if (!summary) return;
-  if (activeFilter==='all') { summary.style.display='none'; return; }
-  const filtered = allTrades.filter(t=>getTradeMonth(t)===activeFilter);
-  const wins = filtered.filter(t=>t.realizedPL>0);
-  const totalPL = filtered.reduce((s,t)=>s+t.realizedPL,0);
-  const wr = filtered.length ? Math.round(wins.length/filtered.length*100) : 0;
-  const fmtPLsign = n => (n>=0?'+ $':'- $')+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  summary.style.display='flex';
-  summary.innerHTML = `
-    <span style="font-weight:600;color:#1E293B">${getMonthLabel(activeFilter)}</span>
-    <span style="color:${totalPL>=0?'#059669':'#DC2626'};font-weight:700">${fmtPLsign(totalPL)}</span>
-    <span style="color:#94A3B8">·</span>
-    <span style="color:#475569">${wins.length}W / ${filtered.length-wins.length}L</span>
-    <span style="color:#94A3B8">·</span>
-    <span style="color:#475569">${wr}% win rate</span>
-    <span style="color:#94A3B8">·</span>
-    <span style="color:#475569">avg ${fmtPLsign(filtered.length?totalPL/filtered.length:0)} per trade</span>
-  `;
+  if (!bar) return;
+
+  const months = [...new Set(trades.map(getTradeMonth))].filter(Boolean).sort();
+  if (!months.length) return;
+
+  const MONTH_NAMES = {'01':'Jan','02':'Feb','03':'Mar','04':'Apr','05':'May','06':'Jun',
+                       '07':'Jul','08':'Aug','09':'Sep','10':'Oct','11':'Nov','12':'Dec'};
+  const label = ym => { const [y,m]=ym.split('-'); return (MONTH_NAMES[m]||m)+' \''+y.slice(2); };
+
+  let active = 'all';
+
+  function applyFilter(month) {
+    active = month;
+    const rows = [...document.querySelectorAll('#tradeTableBody tr')];
+
+    // Show/hide rows and renumber
+    let n = 1;
+    rows.forEach(row => {
+      const show = month === 'all' || row.dataset.month === month;
+      row.style.display = show ? '' : 'none';
+      if (show) { const el = row.querySelector('.trade-num'); if (el) el.textContent = n++; }
+    });
+
+    // Trade count
+    const visible = rows.filter(r => r.style.display !== 'none').length;
+    const countEl = document.getElementById('tradeCount');
+    if (countEl) countEl.textContent = month === 'all' ? trades.length+' trades' : visible+' of '+trades.length;
+
+    // Filter summary
+    if (summary) {
+      if (month === 'all') { summary.style.display = 'none'; }
+      else {
+        const ft = trades.filter(t => getTradeMonth(t) === month);
+        const wins = ft.filter(t => t.realizedPL > 0);
+        const pl = ft.reduce((s,t) => s+t.realizedPL, 0);
+        const wr = ft.length ? Math.round(wins.length/ft.length*100) : 0;
+        const sign = pl >= 0 ? '+ $' : '- $';
+        const plColor = pl >= 0 ? '#059669' : '#DC2626';
+        summary.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 16px;background:#F8FAFC;border-bottom:1px solid #F1F5F9;font-size:12px;flex-wrap:wrap';
+        summary.innerHTML =
+          `<span style="font-weight:600;color:#1E293B">${label(month)}</span>`+
+          `<span style="color:${plColor};font-weight:700">${sign}${Math.abs(pl).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})}</span>`+
+          `<span style="color:#94A3B8">·</span>`+
+          `<span style="color:#475569">${wins.length}W / ${ft.length-wins.length}L · ${wr}% win rate</span>`+
+          `<span style="color:#94A3B8">·</span>`+
+          `<span style="color:#475569">avg ${ft.length?(pl>=0?'+ $':'- $')+Math.abs(pl/ft.length).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}):'—'} per trade</span>`;
+      }
+    }
+
+    // Rebuild buttons with updated active state
+    renderBtns();
+  }
+
+  function renderBtns() {
+    const all = [{key:'all',lbl:'All time'}, ...months.map(m=>({key:m,lbl:label(m)}))];
+    bar.innerHTML = all.map(b => {
+      const isActive = active === b.key;
+      return `<button onclick="window.__filter('${b.key}')" style="font-size:11px;padding:4px 12px;border-radius:20px;border:1px solid ${isActive?'#0F172A':'#E2E8F0'};background:${isActive?'#0F172A':'#fff'};color:${isActive?'#fff':'#64748B'};cursor:pointer;font-family:inherit;font-weight:500;transition:all .15s">${b.lbl}</button>`;
+    }).join('');
+  }
+
+  window.__filter = applyFilter;
+  renderBtns();
+  applyFilter('all');
 }
 
 // ─────────────────────────────────────────────
@@ -831,9 +828,6 @@ function renderTrades(trades) {
     `;
     tbody.appendChild(tr);
   });
-
-  buildMonthFilters(trades);
-  applyFilter(trades);
 }
 
 function handleNoteInput(el) {
@@ -942,6 +936,7 @@ function processFile(file) {
 
       journalState = { trades, equityCurve, openPositions:openPos, meta:parsed.meta, navData:parsed.navData };
       renderAll(trades, openPos, equityCurve, parsed.meta, parsed.navData, parsed.twrr);
+      initFilters(trades);
       document.getElementById('uploadZone').classList.add('hidden');
 
       // Show success toast
@@ -1062,6 +1057,7 @@ document.addEventListener('DOMContentLoaded', ()=>{
     navData: INITIAL_NAV
   };
   renderAll(journalState.trades, journalState.openPositions, journalState.equityCurve, INITIAL_META, INITIAL_NAV, 97.09);
+  initFilters(journalState.trades);
   fetchNews();
 
   // Set today's date
