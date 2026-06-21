@@ -401,17 +401,17 @@ const INITIAL_TRADES = [
     entryDate:'2026-06-17 00:00', exitDate:'2026-06-18 00:00', holdTime:'1 day', realizedPL:376.28, commission:3.72 }
 ];
 const INITIAL_EQUITY = [
-  { label:'Mar 13', value:5000 },
-  { label:'Mar 23', value:4633.77 },
-  { label:'May 25', value:9198.78 },
-  { label:'May 28', value:9593.80 },
-  { label:'Jun 4',  value:10253.84 },
-  { label:'Jun 5',  value:9801.36 },
-  { label:'Jun 9',  value:8698.87 },
-  { label:'Jun 15', value:9854.50 },
-  { label:'Jun 16', value:9843.88 },
-  { label:'Jun 17', value:10866.39 },
-  { label:'Jun 18', value:11242.67 }
+  { label:'Mar 13', value:5000,      month:'2026-03' },
+  { label:'Mar 23', value:4633.77,   month:'2026-03' },
+  { label:'May 25', value:9198.78,   month:'2026-05' },
+  { label:'May 28', value:9593.80,   month:'2026-05' },
+  { label:'Jun 4',  value:10253.84,  month:'2026-06' },
+  { label:'Jun 5',  value:9801.36,   month:'2026-06' },
+  { label:'Jun 9',  value:8698.87,   month:'2026-06' },
+  { label:'Jun 15', value:9854.50,   month:'2026-06' },
+  { label:'Jun 16', value:9843.88,   month:'2026-06' },
+  { label:'Jun 17', value:10866.39,  month:'2026-06' },
+  { label:'Jun 18', value:11242.67,  month:'2026-06' }
 ];
 const INITIAL_OPEN = [];
 const INITIAL_META = {
@@ -612,14 +612,15 @@ function buildRoundTrips(rawTrades) {
 // EQUITY CURVE BUILDER
 // ─────────────────────────────────────────────
 function buildEquityCurve(trades, startingCash) {
-  if (!trades.length) return [{label:'Start',value:startingCash}];
+  if (!trades.length) return [{label:'Start',value:startingCash,month:''}];
   const sorted = [...trades].sort((a,b)=>a.exitDate.localeCompare(b.exitDate));
-  const pts = [{label:'Start',value:startingCash}];
+  const pts = [{label:'Start',value:startingCash,month:''}];
   let cum = startingCash;
   for (const t of sorted) {
     cum += t.realizedPL;
-    const d = t.exitDate.split(',')[0]||t.exitDate.split(' ')[0];
-    pts.push({label:d, value:parseFloat(cum.toFixed(2))});
+    const d = (t.exitDate.split(',')[0]||t.exitDate.split(' ')[0]).trim();
+    const mm = d.match(/(\d{4}-\d{2})/);
+    pts.push({label:d, value:parseFloat(cum.toFixed(2)), month: mm ? mm[1] : ''});
   }
   return pts;
 }
@@ -851,6 +852,17 @@ function initFilters(trades) {
 
     // Rebuild buttons with updated active state
     renderBtns();
+
+    // Re-render equity curve for the selected month
+    const eq = journalState.equityCurve || INITIAL_EQUITY;
+    if (month === 'all') {
+      renderChart(eq);
+    } else {
+      const firstIdx = eq.findIndex(p => p.month === month);
+      const anchorPt  = firstIdx > 0 ? {...eq[firstIdx-1]} : null;
+      const monthPts  = eq.filter(p => p.month === month);
+      renderChart(anchorPt ? [anchorPt, ...monthPts] : monthPts);
+    }
   }
 
   function renderBtns() {
