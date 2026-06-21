@@ -989,100 +989,50 @@ const TRADE_ADVICE = {
     ]}
 };
 
-async function fetchAdvice(trade) {
-  const key = getApiKey();
-  if (!key) throw new Error('no_key');
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-6', max_tokens: 400,
-      messages: [{ role: 'user', content:
-        `You are a futures trading coach. Analyse this MES (Micro E-mini S&P 500, $5/point) trade in 3 bullet points. Be specific and actionable. Return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences).
-
-Trade: ${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold ${trade.holdTime} | P&L ${trade.realizedPL>=0?'+':''}$${trade.realizedPL.toFixed(2)} | ${trade.realizedPL>=0?'WIN':'LOSS'}
-
-Focus on: entry quality, stop/risk management, target selection, and one key lesson.`
-      }]
-    })
-  });
-  if (!res.ok) throw new Error('api_' + res.status);
-  const data = await res.json();
-  const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-  const m = txt.match(/\{[\s\S]*\}/);
-  return m ? JSON.parse(m[0]) : null;
-}
-
 function renderAdviceCell(trade) {
   const id = trade.key || trade.id;
   const stored = (() => { try { return JSON.parse(localStorage.getItem('tj_adv_'+id)||'null'); } catch(e) { return null; } })();
   const adv = stored || TRADE_ADVICE[trade.id] || null;
 
-  const ratingColor = r => r==='good' ? '#059669' : r==='bad' ? '#DC2626' : '#D97706';
-  const ratingBg    = r => r==='good' ? '#D1FAE5' : r==='bad' ? '#FEE2E2' : '#FEF3C7';
-  const ratingIcon  = r => r==='good' ? '✓' : r==='bad' ? '✗' : '⚠';
+  const ratingColor = r => r==='good'?'#059669':r==='bad'?'#DC2626':'#D97706';
+  const ratingBg    = r => r==='good'?'#D1FAE5':r==='bad'?'#FEE2E2':'#FEF3C7';
+  const ratingIcon  = r => r==='good'?'✓':r==='bad'?'✗':'⚠';
 
-  if (adv) {
-    return `<div style="font-size:11px">
+  const copyPrompt = `Re-analyse this trade for me:\n${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold: ${trade.holdTime} | P&L: ${trade.realizedPL>=0?'+':''}$${Math.abs(trade.realizedPL).toFixed(2)} | ${trade.realizedPL>=0?'WIN':'LOSS'}\n\nGive me 3 specific bullet points: what I did well, what I should have done differently, and one rule to take forward.`;
+
+  const advHtml = adv ? `
+    <div style="font-size:11px">
       <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
         <span style="background:${ratingBg(adv.rating)};color:${ratingColor(adv.rating)};font-size:10px;padding:1px 7px;border-radius:3px;font-weight:600">${ratingIcon(adv.rating)} ${adv.verdict}</span>
       </div>
       <ul style="padding-left:14px;margin:0;color:#374151;line-height:1.5">
         ${adv.points.map(p=>`<li style="margin-bottom:4px">${p}</li>`).join('')}
       </ul>
-      <button onclick="refreshAdvice('${id}',this)" style="margin-top:7px;font-size:10px;padding:2px 8px;cursor:pointer;border-radius:4px;color:#6366F1;border:1px solid #C7D2FE;background:#EEF2FF;font-family:inherit">↻ Re-analyse</button>
-    </div>`;
-  }
+    </div>` : '<div style="font-size:11px;color:#94A3B8">No pre-loaded advice for this trade.</div>';
 
-  return `<button onclick="refreshAdvice('${id}',this)" style="font-size:11px;padding:4px 10px;cursor:pointer;border-radius:5px;color:#6366F1;border:1px solid #C7D2FE;background:#EEF2FF;font-family:inherit">Ask Claude ↗</button>`;
+  return `${advHtml}
+    <button onclick="copyTradePrompt(this,'${id}')"
+      style="margin-top:8px;font-size:10px;padding:3px 10px;cursor:pointer;border-radius:4px;color:#6366F1;border:1px solid #C7D2FE;background:#EEF2FF;font-family:inherit;display:flex;align-items:center;gap:4px">
+      <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="flex-shrink:0"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      Copy prompt for Claude
+    </button>
+    <input type="hidden" id="prompt_${id}" value="${copyPrompt.replace(/"/g,'&quot;').replace(/\n/g,'&#10;')}">`;
 }
 
-window.refreshAdvice = async function(tradeId, btn) {
-  const cell = btn.closest('td');
-  const trades = journalState.trades || INITIAL_TRADES;
-  const trade = trades.find(t=>(t.key||t.id)===tradeId);
-  cell.innerHTML = '<span style="font-size:11px;color:#94A3B8">Analysing...</span>';
-  try {
-    if (!trade) throw new Error('trade not found');
-    const controller = new AbortController();
-    setTimeout(() => controller.abort(), 8000);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', signal: controller.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 400,
-        messages: [{ role: 'user', content: `You are a futures trading coach. Analyse this MES ($5/point) trade in 3 bullet points. Return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences). Trade: ${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold ${trade.holdTime} | P&L ${trade.realizedPL>=0?'+':''}$${trade.realizedPL.toFixed(2)} | ${trade.realizedPL>=0?'WIN':'LOSS'}. Focus on entry quality, stop/risk management, target, and one key lesson.` }] })
-    });
-    if (!res.ok) throw new Error('api_'+res.status);
-    const data = await res.json();
-    const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-    const m = txt.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error('parse');
-    const adv = JSON.parse(m[0]);
-    try { localStorage.setItem('tj_adv_'+tradeId, JSON.stringify(adv)); } catch(e) {}
-    cell.innerHTML = renderAdviceCell({...trade, key:tradeId});
-  } catch(e) {
-    // Restore pre-embedded advice — don't show blank error
-    if (trade) {
-      cell.innerHTML = renderAdviceCell({...trade, key:tradeId});
-      const note = document.createElement('div');
-      note.style.cssText = 'font-size:10px;color:#94A3B8;margin-top:6px;padding-top:6px;border-top:1px solid #F1F5F9';
-      if (e.message === 'no_key') {
-        note.innerHTML = '⚠ No API key set — click <strong>Add API key</strong> in the header to enable live re-analysis.';
-      } else if (e.message === 'api_401') {
-        note.innerHTML = '⚠ API key invalid or expired — click <strong>Add API key</strong> in the header to update it.';
-      } else {
-        note.textContent = 'API call failed ('+e.message+') — check your key and connection.';
-      }
-      cell.querySelector('div') && cell.querySelector('div').appendChild(note);
-    }
-  }
+window.copyTradePrompt = function(btn, id) {
+  const input = document.getElementById('prompt_'+id);
+  if (!input) return;
+  const text = input.value.replace(/&#10;/g,'\n').replace(/&quot;/g,'"');
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.innerHTML;
+    btn.textContent = '✓ Copied — paste into Claude chat';
+    btn.style.color = '#059669';
+    btn.style.borderColor = '#6EE7B7';
+    btn.style.background = '#D1FAE5';
+    setTimeout(() => { btn.innerHTML = orig; btn.style.color='#6366F1'; btn.style.borderColor='#C7D2FE'; btn.style.background='#EEF2FF'; }, 2500);
+  });
 };
+
 
 // ─────────────────────────────────────────────
 // RENDER TRADES
