@@ -991,21 +991,28 @@ const TRADE_ADVICE = {
 
 async function fetchAdvice(trade) {
   const key = getApiKey();
-  const headers = { 'Content-Type': 'application/json' };
-  if (key) { headers['x-api-key'] = key; headers['anthropic-version'] = '2023-06-01'; headers['anthropic-dangerous-direct-browser-access'] = 'true'; }
-
-  const prompt = `You are a futures trading coach. Analyse this MES (Micro E-mini S&P 500, $5/point) trade in 3 bullet points. Be specific and actionable. Return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences).
-
-Trade: ${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold ${trade.holdTime} | P&L ${trade.realizedPL >= 0 ? '+' : ''}$${trade.realizedPL.toFixed(2)} | Result: ${trade.realizedPL >= 0 ? 'WIN' : 'LOSS'}
-
-Focus on: entry quality, stop/risk management, target selection, and one key lesson.`;
+  if (!key) throw new Error('no_key');
 
   const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST', headers,
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 400,
-      messages: [{ role: 'user', content: prompt }] })
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-6', max_tokens: 400,
+      messages: [{ role: 'user', content:
+        `You are a futures trading coach. Analyse this MES (Micro E-mini S&P 500, $5/point) trade in 3 bullet points. Be specific and actionable. Return ONLY a JSON object with keys "verdict" (one sentence), "rating" ("good"|"ok"|"bad"), and "points" (array of 3 strings, each max 2 sentences).
+
+Trade: ${trade.direction} ${trade.qty}× ${trade.symbol} | Entry ${trade.avgEntry} | Exit ${trade.exitPrice} | Hold ${trade.holdTime} | P&L ${trade.realizedPL>=0?'+':''}$${trade.realizedPL.toFixed(2)} | ${trade.realizedPL>=0?'WIN':'LOSS'}
+
+Focus on: entry quality, stop/risk management, target selection, and one key lesson.`
+      }]
+    })
   });
-  if (!res.ok) throw new Error('api_'+res.status);
+  if (!res.ok) throw new Error('api_' + res.status);
   const data = await res.json();
   const txt = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
   const m = txt.match(/\{[\s\S]*\}/);
@@ -1065,9 +1072,13 @@ window.refreshAdvice = async function(tradeId, btn) {
       cell.innerHTML = renderAdviceCell({...trade, key:tradeId});
       const note = document.createElement('div');
       note.style.cssText = 'font-size:10px;color:#94A3B8;margin-top:6px;padding-top:6px;border-top:1px solid #F1F5F9';
-      note.textContent = e.message === 'api_401' || e.message === 'api_403'
-        ? '⚠ API key missing or invalid — click "Add API key" in the header to enable live re-analysis.'
-        : 'Could not reach API — check connection or add your API key in the header.';
+      if (e.message === 'no_key') {
+        note.innerHTML = '⚠ No API key set — click <strong>Add API key</strong> in the header to enable live re-analysis.';
+      } else if (e.message === 'api_401') {
+        note.innerHTML = '⚠ API key invalid or expired — click <strong>Add API key</strong> in the header to update it.';
+      } else {
+        note.textContent = 'API call failed ('+e.message+') — check your key and connection.';
+      }
       cell.querySelector('div') && cell.querySelector('div').appendChild(note);
     }
   }
